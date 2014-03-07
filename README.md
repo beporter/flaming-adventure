@@ -3,6 +3,10 @@ flaming-adventure
 
 Testing auto PR merging on local command line.
 
+## master change
+
+Advance the mainline.
+
 
 ## The general idea
 
