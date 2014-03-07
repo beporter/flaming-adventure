@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+
+#---------------------------------------------------------------------
+usage ()
+{
+	cat <<EOT
+
+${0##*/}
+    git extension to rebase and merge a feature branch into a
+    configured merge target. Has the pleasant (intended) side
+    effect of closing a GitHub pull request associated with the
+    named feature branch.
+
+Usage:
+    bin/${0##*/} [feature-branch-name]
+
+    If no branch name is provided, the currently-checked-out
+    branch will be used.
+
+Config:
+	You must set prclose.target either in your project's
+	.git/config or your user's ~/.gitconfig like so:
+
+	git config --add prclose.target target-branch-name
+
+	This is the name of the (local) branch into which feature
+	branches will be merged.
+
+EOT
+
+	exit 0
+}
+if [ "$1" = '-h' ]; then
+	usage
+fi
+
+MERGE_TARGET_BRANCH=$(git config prclose.target)
+if [ -z "$MERGE_TARGET_BRANCH" ]; then
+	echo "pr-close needs a branch set as a merge target. Please run:"
+	echo "  git config --add prclose.target target-branch-name"
+	exit 1
+fi
+
+if [ -n "$1" ]; then
+	FEATURE_BRANCH="$1"
+else
+	FEATURE_BRANCH=$(git name-rev HEAD 2> /dev/null | awk "{ print \$2 }")
+fi
+
+echo $FEATURE_BRANCH
