@@ -132,9 +132,10 @@ fi
 # Switch back to target branch to prepare for merging.
 git checkout $MERGE_TARGET_BRANCH
 
+#@TODO: Should obtain information about the PR associated with this branch from the Github API to use in the commit message for the merge.
+
 # Merge in the feature, but don't just fast forward. (Gives us the nice "bubble" in the commit history.)
 git merge --no-ff $FEATURE_BRANCH
-
 
 # Push the merge to Github. (Should close the PR but not delete the branch.)
 git push origin $MERGE_TARGET_BRANCH
