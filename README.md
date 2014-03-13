@@ -38,3 +38,7 @@ git branch -d origin/$1  # Delete the local copy of the remote branch.
 ## License
 
 MIT
+
+## Trivial change
+
+* pr1
