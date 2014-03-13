@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#set -vx  #@TODO: remove
 
 #---------------------------------------------------------------------
 usage ()
@@ -9,7 +10,8 @@ ${0##*/}
     git extension to rebase and merge a feature branch into a
     configured merge target. Has the pleasant (intended) side
     effect of closing a GitHub pull request associated with the
-    named feature branch.
+    named feature branch. This plugin assumes you have a remote
+    named "origin" configured.
 
 Usage:
     bin/${0##*/} [feature-branch-name]
@@ -18,10 +20,10 @@ Usage:
     branch will be used.
 
 Config:
-	You must set prclose.target either in your project's
+	You must set \`prclose.target\` either in your project's
 	.git/config or your user's ~/.gitconfig like so:
 
-	git config --add prclose.target target-branch-name
+	git config [--global] prclose.target target-branch-name
 
 	This is the name of the (local) branch into which feature
 	branches will be merged.
@@ -34,17 +36,95 @@ if [ "$1" = '-h' ]; then
 	usage
 fi
 
-MERGE_TARGET_BRANCH=$(git config prclose.target)
-if [ -z "$MERGE_TARGET_BRANCH" ]; then
-	echo "pr-close needs a branch set as a merge target. Please run:"
-	echo "  git config --add prclose.target target-branch-name"
-	exit 1
-fi
-
+# Set the feature branch.
 if [ -n "$1" ]; then
 	FEATURE_BRANCH="$1"
 else
 	FEATURE_BRANCH=$(git name-rev HEAD 2> /dev/null | awk "{ print \$2 }")
 fi
 
-echo $FEATURE_BRANCH
+# Fetch the merge target branch name.
+MERGE_TARGET_BRANCH=$(git config prclose.target)
+if [ -z "$MERGE_TARGET_BRANCH" ]; then
+	echo "pr-close needs a branch set as a merge target. Please run:"
+	echo "  git config prclose.target target-branch-name"
+	exit 1
+fi
+
+# Make sure the merge target branch exists.
+if ! BASE_REV="$(git rev-parse --verify refs/heads/"$MERGE_TARGET_BRANCH" 2>/dev/null)"; then
+    echo "'$MERGE_TARGET_BRANCH' is missing. Please update your prclose.target config."
+    exit 2
+fi
+
+# Make sure the provided feature branch isn't the same as our target.
+if [ "$FEATURE_BRANCH" = "$MERGE_TARGET_BRANCH" ]; then
+    echo "Branch name matches merge target. Please supply a feature branch name as an argument, or checkout the branch."
+	exit 3
+fi
+
+# Make sure the working dir is clean.
+# Ref: http://stackoverflow.com/a/5143914/70876
+if ! git diff-index --quiet HEAD --; then
+	echo "Your working directory is not clean. Please commit or stash any changes."
+	exit 4
+fi
+
+# Rebase the feature branch if it does not already extend from the target's tip.
+PARENTS_OF_COMMITS_BEYOND_BASE="$(
+  git rev-list --pretty=tformat:%P "$FEATURE_BRANCH" --not "$BASE_REV" | grep -v '^commit '
+)"
+case "$PARENTS_OF_COMMITS_BEYOND_BASE" in
+	*\ *)			echo "Must not push merge commits (rebase instead)."
+					exit 5 ;;
+
+	*"$BASE_REV"*)	REBASE_REQUIRED=false
+					;;
+
+	*)				echo "Rebase required for '$FEATURE_BRANCH' to descend from tip of '$MERGE_TARGET_BRANCH'."
+					REBASE_REQUIRED=true
+					;;
+esac
+
+# Start on target branch.
+git checkout $MERGE_TARGET_BRANCH
+
+# Make sure it's up to date.
+git pull origin $MERGE_TARGET_BRANCH
+
+# Make sure we have all available branches.
+git fetch origin
+
+# Switch to the feature branch in question.
+git checkout $FEATURE_BRANCH
+
+if [ $REBASE_REQUIRED ]; then
+	# Rebase the branch on top of target branch.
+	git rebase $MERGE_TARGET_BRANCH
+
+	# Force the rebased branch back up to origin.
+	git push origin $FEATURE_BRANCH -f
+
+	#@TODO: We should really pause here to let travis run and "approve" the rebase before we merge.
+fi
+
+# Switch back to target branch to prepare for merging.
+git checkout $MERGE_TARGET_BRANCH
+
+# Merge in the feature, but don't just fast forward. (Gives us the nice "bubble" in the commit history.)
+git merge --no-ff $FEATURE_BRANCH
+
+
+# Push the merge to Github. (Should close the PR but not delete the branch.)
+git push origin $MERGE_TARGET_BRANCH
+
+# Delete the remote branch(?)
+#git push origin :$FEATURE_BRANCH
+
+# Delete the local (now-merged) branch.
+git branch -d $FEATURE_BRANCH
+
+# Make local repo match the remote. (Will delete the local copy of the remote branch.)
+git fetch origin --prune
+
+exit 0  # Success.
