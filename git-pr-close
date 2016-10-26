@@ -13,6 +13,10 @@ ${0##*/}
     named feature branch. This plugin assumes you have a remote
     named "origin" configured.
 
+    If you have Github's \`hub\` command installed, it will be
+    used to check the status of the rebase if one was necessary.
+    If the CI status is >0, the merge will abort.
+
 Usage:
     bin/${0##*/} [feature-branch-name]
 
@@ -20,13 +24,13 @@ Usage:
     branch will be used.
 
 Config:
-	You must set \`prclose.target\` either in your project's
-	.git/config or your user's ~/.gitconfig like so:
+    You must set \`prclose.target\` either in your project's
+    .git/config or your user's ~/.gitconfig like so:
 
-	git config [--global] prclose.target target-branch-name
+    git config [--global] prclose.target target-branch-name
 
-	This is the name of the (local) branch into which feature
-	branches will be merged.
+    This is the name of the (local) branch into which feature
+    branches will be merged.
 
 EOT
 
@@ -75,15 +79,19 @@ PARENTS_OF_COMMITS_BEYOND_BASE="$(
   git rev-list --pretty=tformat:%P "$FEATURE_BRANCH" --not "$BASE_REV" | grep -v '^commit '
 )"
 case "$PARENTS_OF_COMMITS_BEYOND_BASE" in
-	*\ *)			echo "Must not push merge commits (rebase instead)."
-					exit 5 ;;
+	*\ *)
+		echo "Must not push merge commits (rebase instead)."
+		exit 5
+		;;
 
-	*"$BASE_REV"*)	REBASE_REQUIRED=false
-					;;
+	*"$BASE_REV"*)
+		REBASE_REQUIRED=false
+		;;
 
-	*)				echo "Rebase required for '$FEATURE_BRANCH' to descend from tip of '$MERGE_TARGET_BRANCH'."
-					REBASE_REQUIRED=true
-					;;
+	*)
+		echo "Rebase required for '$FEATURE_BRANCH' to descend from tip of '$MERGE_TARGET_BRANCH'."
+		REBASE_REQUIRED=true
+		;;
 esac
 
 # Start on target branch.
@@ -106,25 +114,36 @@ if [ $REBASE_REQUIRED ]; then
 	git push origin $FEATURE_BRANCH -f
 
 	#@TODO: We should really pause here to let travis run and "approve" the rebase before we merge.
+	HUB="$( which hub-@TODO-disabled )"
+	if [ $? -gt 0 ]; then
+		echo "Checking build status..."
+		NEXT_WAIT_TIME=0
+		until $HUB ci-status -v || [ $NEXT_WAIT_TIME -eq 4 ]; do
+			echo "Retry $NEXT_WAIT_TIME."
+			sleep $(( NEXT_WAIT_TIME++ ))
+		done
+		if [ $NEXT_WAIT_TIME -eq 4 ]; then
+			echo "Github reports that the build failed/errored: $?"
+			exit 6
+		fi
+	fi
 fi
 
 # Switch back to target branch to prepare for merging.
 git checkout $MERGE_TARGET_BRANCH
 
+#@TODO: Should obtain information about the PR associated with this branch from the Github API to use in the commit message for the merge.
+
 # Merge in the feature, but don't just fast forward. (Gives us the nice "bubble" in the commit history.)
 git merge --no-ff $FEATURE_BRANCH
-
 
 # Push the merge to Github. (Should close the PR but not delete the branch.)
 git push origin $MERGE_TARGET_BRANCH
 
-# Delete the remote branch(?)
-#git push origin :$FEATURE_BRANCH
-
-# Delete the local (now-merged) branch.
-git branch -d $FEATURE_BRANCH
-
 # Make local repo match the remote. (Will delete the local copy of the remote branch.)
 git fetch origin --prune
+
+# Delete the local (now-merged) branch.
+#git branch -d origin/$FEATURE_BRANCH
 
 exit 0  # Success.
