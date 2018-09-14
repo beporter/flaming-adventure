@@ -1,4 +1,4 @@
-flaming-adventure
+git-pr-close
 =================
 
 Testing auto PR merging on local command line.
